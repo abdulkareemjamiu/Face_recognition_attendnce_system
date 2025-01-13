@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}Start Attendance{% endblock %}
+
+{% block content %}
+<div class="d-flex min-vh-90">
+    <!-- Left side - Camera Feed -->
+    <div class="flex-grow-1 bg-light d-flex align-items-center justify-content-center mb-4">
+        <img src="{{ url_for('video_feed') }}" alt="Camera Feed" class="camera-feed">
+    </div>
+
+    <!-- Right side - Student Info and Controls -->
+    <div class="attendance-sidebar">
+        <!-- Search and Manual Attendance -->
+        <div class="p-3 border-bottom">
+            <div class="d-flex gap-2">
+                <div class="input-group">
+                    <input type="text" id="studentSearch" class="form-control" placeholder="Enter admin number...">
+                    <button class="btn btn-primary" onclick="searchStudent()">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </div>
+                <button class="btn btn-success" onclick="markAttendanceManually()" id="markAttendanceBtn" disabled>
+                    <i class="fas fa-check"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Student Info Card -->
+        <div class="p-3">
+            <div id="messageArea"></div>
+            <div class="card shadow-sm" id="studentCard" style="display: none;">
+                <div class="card-body text-center">
+                    <img src="" class="rounded-circle mb-3" style="width: 120px; height: 120px; object-fit: cover;" id="studentImage">
+                    <h5 class="card-title mb-1" id="studentName"></h5>
+                    <p class="text-muted small mb-3" id="studentDepartment"></p>
+                    <div class="d-flex justify-content-center gap-3">
+                        <div class="text-center">
+                            <h6 class="mb-1">Total Attendance</h6>
+                            <span class="badge bg-primary" id="totalAttendance">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.attendance-sidebar {
+    width: 400px;
+    background: #fff;
+    border-left: 1px solid #dee2e6;
+    overflow-y: auto;
+}
+
+.camera-feed {
+    max-width: 100%;
+    height: auto;
+    margin-bottom: 2rem;
+}
+
+@media (max-width: 768px) {
+    .d-flex.min-vh-100 {
+        flex-direction: column;
+    }
+    
+    .attendance-sidebar {
+        width: 100%;
+        border-left: none;
+        border-top: 1px solid #dee2e6;
+    }
+}
+</style>
+
+<script>
+let currentStudentId = null;
+
+async function searchStudent() {
+    const adminNumber = document.getElementById('studentSearch').value;
+    if (!adminNumber) return;
+
+    try {
+        const response = await fetch(`/search_student/${adminNumber}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('studentCard').style.display = 'block';
+            document.getElementById('studentName').textContent = data.student.name;
+            document.getElementById('studentDepartment').textContent = data.student.department;
+            document.getElementById('totalAttendance').textContent = data.student.total_attendance;
+            document.getElementById('studentImage').src = data.student.image_path || '/static/images/default-profile.jpg';
+            document.getElementById('markAttendanceBtn').disabled = false;
+            currentStudentId = data.student.admin_number;
+            showMessage('Student found!', 'success');
+        } else {
+            document.getElementById('studentCard').style.display = 'none';
+            document.getElementById('markAttendanceBtn').disabled = true;
+            currentStudentId = null;
+            showMessage('Student not found', 'danger');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        showMessage('Error searching for student', 'danger');
+    }
+}
+
+async function markAttendanceManually() {
+    if (!currentStudentId) return;
+    
+    try {
+        const response = await fetch('/mark_attendance_manual', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ student_id: currentStudentId })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            document.getElementById('totalAttendance').textContent = data.total_attendance;
+            showMessage('Attendance marked successfully!', 'success');
+        } else {
+            showMessage('Failed to mark attendance', 'danger');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        showMessage('Error marking attendance', 'danger');
+    }
+}
+
+function showMessage(message, type) {
+    const messageArea = document.getElementById('messageArea');
+    messageArea.innerHTML = `
+        <div class="alert alert-${type} alert-dismissible fade show">
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+}
+</script>
+{% endblock %}

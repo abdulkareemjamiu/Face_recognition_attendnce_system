@@ -1,0 +1,60 @@
+/* Basic styling */
+.card {
+	margin-bottom: 20px;
+	transition: transform 0.3s ease;
+}
+
+.card:hover {
+	transform: translateY(-5px);
+}
+
+.card-header {
+	background-color: #f8f9fa;
+}
+
+.btn-sm {
+	margin-right: 5px;
+}
+
+.table td, .table th {
+	vertical-align: middle;
+}
+
+/* Login Page Styles */
+body {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    min-height: 100vh;
+}
+
+.min-vh-100 {
+    min-height: 100vh;
+}
+
+.form-control-lg, .form-select, .btn-lg {
+    font-size: 1rem;
+}
+
+.input-group-text {
+    min-width: 40px;
+    justify-content: center;
+}
+
+.alert {
+    margin-bottom: 1.5rem;
+}
+
+/* Animation for alerts */
+.alert-dismissible {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateY(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}

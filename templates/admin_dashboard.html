@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex">
+    <!-- Sidebar -->
+    <nav id="sidebar" class="bg-light">
+        <div class="sidebar-header">
+            <h3 class="text-forestgreen">Admin Panel</h3>
+        </div>
+        <ul class="list-unstyled components">
+            <li class="active">
+                <a href="{{ url_for('admin_dashboard') }}" class="text-dark">
+                    <i class="fas fa-users me-2 text-forestgreen"></i>Students
+                </a>
+            </li>
+            <li>
+                <a href="{{ url_for('attendance') }}" class="text-dark">
+                    <i class="fas fa-clock me-2 text-forestgreen"></i>Attendance
+                </a>
+            </li>
+            <li>
+                <a href="{{ url_for('logout') }}" class="text-dark">
+                    <i class="fas fa-sign-out-alt me-2 text-forestgreen"></i>Logout
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- Main Content Area -->
+    <div class="flex-grow-1 p-4">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                            <h4 class="mb-0">Student List</h4>
+                            <div class="d-flex gap-2">
+                                <div class="input-group">
+                                    <input type="text" id="studentSearch" class="form-control" placeholder="Search students...">
+                                    <span class="input-group-text">
+                                        <i class="fas fa-search"></i>
+                                    </span>
+                                </div>
+                                <a href="{{ url_for('add_student') }}" class="btn btn-forestgreen">
+                                    <i class="fas fa-user-plus me-2"></i>Add New Student
+                                </a>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="studentTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Photo</th>
+                                            <th>Admin Number</th>
+                                            <th>Name</th>
+                                            <th>Department</th>
+                                            <th>Year</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for student in students %}
+                                        <tr>
+                                            <td>
+                                                <img src="{{ url_for('static', filename=student.image_path.replace('static/', '')) if student.image_path else 'images/default-profile.jpg' }}" 
+                                                     class="rounded-circle" style="width: 40px; height: 40px; object-fit: cover;">
+                                            </td>
+                                            <td>{{ student.admin_number }}</td>
+                                            <td>{{ student.name }}</td>
+                                            <td>{{ student.department }}</td>
+                                            <td>{{ student.year }}</td>
+                                            <td>
+                                                <div class="btn-group">
+                                                    <a href="{{ url_for('edit_student', student_id=student.id) }}" 
+                                                       class="btn btn-sm btn-outline-forestgreen">
+                                                        <i class="fas fa-edit"></i>
+                                                    </a>
+                                                    <button type="button" 
+                                                            class="btn btn-sm btn-outline-danger" 
+                                                            onclick="confirmDelete('{{ student.id }}', '{{ student.name }}')">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Delete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                Are you sure you want to delete <span id="studentName"></span>?
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="deleteForm" method="POST">
+                    <button type="submit" class="btn btn-danger">Delete</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+:root {
+    --forest-green: #228B22;
+}
+
+.bg-forestgreen {
+    background-color: var(--forest-green) !important;
+}
+
+.text-forestgreen {
+    color: var(--forest-green) !important;
+}
+
+.bg-white {
+    background-color: #ffffff !important;
+}
+
+#sidebar {
+    min-width: 250px;
+    max-width: 250px;
+    min-height: 100vh;
+    border-right: 1px solid #e9ecef;
+}
+
+#sidebar .sidebar-header {
+    padding: 20px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+#sidebar ul li a {
+    padding: 15px;
+    display: block;
+    text-decoration: none;
+    transition: all 0.3s;
+}
+
+#sidebar ul li a:hover {
+    background: #f8f9fa;
+    color: var(--forest-green) !important;
+}
+
+.flex-grow-2 {
+    flex: 2;
+}
+
+.card {
+    height: 100%;
+    border: none;
+    border-radius: 10px;
+}
+
+.card-header {
+    border-radius: 10px 10px 0 0 !important;
+}
+
+.btn-forestgreen {
+    background-color: var(--forest-green);
+    color: white;
+}
+
+.btn-forestgreen:hover {
+    background-color: #1a6b1a;
+    color: white;
+}
+
+.table th {
+    border-top: none;
+}
+
+.form-control:focus {
+    border-color: var(--forest-green);
+    box-shadow: 0 0 0 0.2rem rgba(34, 139, 34, 0.25);
+}
+
+.btn-outline-forestgreen {
+    color: var(--forest-green);
+    border-color: var(--forest-green);
+}
+
+.btn-outline-forestgreen:hover {
+    background-color: var(--forest-green);
+    color: white;
+}
+
+@media (max-width: 768px) {
+    .d-flex.gap-4 {
+        flex-direction: column;
+    }
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    $('#sidebarCollapse').on('click', function() {
+        $('#sidebar').toggleClass('active');
+    });
+});
+
+function previewImage(input) {
+    if (input.files && input.files[0]) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('preview').setAttribute('src', e.target.result);
+        }
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+function confirmDelete(studentId, studentName) {
+    const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    document.getElementById('deleteForm').action = `/admin/delete/${studentId}`;
+    document.getElementById('studentName').textContent = studentName;
+    modal.show();
+}
+
+document.getElementById('studentSearch').addEventListener('keyup', function() {
+    const searchText = this.value.toLowerCase();
+    const table = document.getElementById('studentTable');
+    const rows = table.getElementsByTagName('tr');
+
+    for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const cells = row.getElementsByTagName('td');
+        let found = false;
+
+        for (let j = 1; j < cells.length - 1; j++) {
+            const cell = cells[j];
+            if (cell.textContent.toLowerCase().indexOf(searchText) > -1) {
+                found = true;
+                break;
+            }
+        }
+
+        row.style.display = found ? '' : 'none';
+    }
+});
+</script>
+{% endblock %}

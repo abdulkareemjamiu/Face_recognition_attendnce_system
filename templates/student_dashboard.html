@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Student Dashboard - {{ student.name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row">
+        <div class="col-md-8 offset-md-2">
+            <div class="card animate__animated animate__fadeIn">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title">{{ student.name }}'s Dashboard</h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 text-center">
+                             <!-- Display the student's profile picture dynamically -->
+                             {% if student.image_path %}
+                             <img src="{{ url_for('static', filename=student.image_path.replace('static/', '')) }}" 
+                                  alt="{{ student.name }}" 
+                                  class="img-fluid rounded-circle mb-3" 
+                                  style="width: 150px; height: 150px;">
+                             {% else %}
+                             <img src="{{ url_for('static', filename='images/default-profile.jpg') }}" 
+                                  class="img-fluid rounded-circle mb-3" 
+                                  style="width: 150px; height: 150px;" 
+                                  alt="Default Profile">
+                             {% endif %}
+                        </div>
+                        <div class="col-md-8">
+                            <!-- Display the student's details -->
+                            <h1>{{ student.name }}'s Dashboard</h1>
+                            <p><strong>Admin Number:</strong> {{ student.admin_number }}</p>
+                            <p><strong>Department:</strong> {{ student.department }}</p>
+                            <p><strong>Year:</strong> {{ student.year }}</p>
+                            <p><strong>Email:</strong> {{ student.email }}</p>
+                            <p><strong>Address:</strong> {{ student.address }}</p>
+                            
+                            <!-- Attendance Summary Card -->
+                            <div class="card bg-light mt-3">
+                                <div class="card-body">
+                                    <h5 class="card-title text-primary">Attendance Summary</h5>
+                                    <p><strong>Total Classes:</strong> {{ total_classes }}</p>
+                                    <p><strong>Present Count:</strong> {{ total_attendance }}</p>
+                                    <p><strong>Attendance Percentage:</strong> {{ "%.2f"|format(attendance_percentage) }}%</p>
+                                </div>
+                            </div>
+
+
+                            {% if student.notice %}
+                            <div class="alert alert-info mt-4">
+                                <h5 class="alert-heading"><i class="fas fa-bell me-2"></i>Notice:</h5>
+                                <p class="mb-0">{{ student.notice }}</p>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer text-muted">
+                    <a href="{{ url_for('home') }}" class="btn btn-secondary">Back to Home</a></div>
+            </div>
+        </di>
+    </div>
+</div>
+
+<!-- Attendance Records Section -->
+<h2 class="text-center mt-4">Attendance Records</h2>
+<table class="table table-bordered mt-3">
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for attendance in attendances %}
+        <tr>
+            <td>{{ attendance.date.strftime('%Y-%m-%d') }}</td>
+            <td>{{ attendance.status }}</td>
+        </tr>
+        {% endfor %}  <!-- Close the for loop -->
+    </tbody>
+</table>
+{% endblock %}  <!-- Close the content block -->

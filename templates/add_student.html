@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Add Student{% endblock %}
+
+{% block content %}
+<div class="container mt-4 pb-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">Add New Student</h4>
+                </div>
+                <div class="card-body">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show">
+                                    {{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+
+                    <form method="POST" enctype="multipart/form-data">
+                        {{ form.hidden_tag() }}
+                        
+                        <div class="text-center mb-4">
+                            <div class="image-preview-container mx-auto" style="width: 150px; height: 150px;">
+                                <img id="preview" src="{{ url_for('static', filename='images/default-profile.jpg') }}" 
+                                     class="rounded-circle img-fluid" style="width: 150px; height: 150px; object-fit: cover;">
+                            </div>
+                            <div class="mt-2">
+                                {{ form.image_path(class="form-control", onchange="previewImage(this)") }}
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                {{ form.admin_number.label(class="form-label") }}
+                                {{ form.admin_number(class="form-control", required=true, placeholder="Enter admin number") }}
+                            </div>
+                            <div class="col-md-6">
+                                {{ form.name.label(class="form-label") }}
+                                {{ form.name(class="form-control", required=true, placeholder="Enter full name") }}
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                {{ form.department.label(class="form-label") }}
+                                {{ form.department(class="form-control", required=true, placeholder="Enter department") }}
+                            </div>
+                            <div class="col-md-6">
+                                {{ form.year.label(class="form-label") }}
+                                {{ form.year(class="form-control", required=true) }}
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                {{ form.email.label(class="form-label") }}
+                                {{ form.email(class="form-control", required=true, type="email", placeholder="Enter email") }}
+                            </div>
+                            <div class="col-md-6">
+                                {{ form.dob.label(class="form-label") }}
+                                {{ form.dob(class="form-control", required=true, type="date") }}
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.address.label(class="form-label") }}
+                            {{ form.address(class="form-control", required=true, placeholder="Enter address") }}
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.notice.label(class="form-label") }}
+                            {{ form.notice(class="form-control", rows="3", placeholder="Enter any notices or remarks for the student") }}
+                            <div class="form-text">Add any important notices or remarks for the student</div>
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.total_attendance.label(class="form-label") }}
+                            {{ form.total_attendance(class="form-control", type="number", min="0", placeholder="Enter initial total attendance") }}
+                            <div class="form-text">Set initial attendance count if any</div>
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.password.label(class="form-label") }}
+                            {{ form.password(class="form-control", required=true, placeholder="Enter password") }}
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.attendance.label(class="form-label") }}
+                            {{ form.attendance(class="form-control", required=true) }}
+                        </div>
+
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-user-plus me-2"></i>Add Student
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.image-preview-container {
+    position: relative;
+    overflow: hidden;
+    border-radius: 50%;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+</style>
+
+<script>
+function previewImage(input) {
+    if (input.files && input.files[0]) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('preview').setAttribute('src', e.target.result);
+        }
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+</script>
+{% endblock %}
+

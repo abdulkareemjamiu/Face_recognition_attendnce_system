@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Attendance Records{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="display-4 mb-0">Attendance Records</h1>
+        <a href="{{ url_for('download_attendance') }}" class="btn btn-primary">
+            <i class="fas fa-download mr-2"></i> Download Attendance
+        </a>
+    </div>
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Student ID</th>
+                <th>Name</th>
+                <th>Department</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for attendance, student in records %}
+            <tr>
+                <td>{{ student.admin_number }}</td>
+                <td>{{ student.name }}</td>
+                <td>{{ student.department }}</td>
+                <td>{{ attendance.date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
