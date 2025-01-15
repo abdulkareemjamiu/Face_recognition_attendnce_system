@@ -1,4 +1,11 @@
-from flask import Flask, render_template, redirect, url_for, flash, session, request
+from flask import Flask, render_template, redirect, url_for, flash, session, request, Response, stream_with_context, jsonify
+import json
+from datetime import date
+import csv
+from io import StringIO
+from datetime import datetime
+import time
+from sqlalchemy import func
 from flask_bootstrap import Bootstrap
 from models import db, Student, Attendance, Admin
 from werkzeug.utils import secure_filename
@@ -6,15 +13,50 @@ from forms import StudentForm
 import cv2
 import face_recognition
 import os
-import pandas as pd
 import numpy as np
-from flask import jsonify
 import pickle
-from PIL import Image
-from flask import Response
-import csv
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+
+# Face encoding variables
+encodedFaceKnown = []
+studentIDs = []
+
+# Initialize camera capture
+capture = None
+
+def initialize_camera():
+    try:
+        print("Attempting to initialize camera...")
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Try DirectShow first
+        
+        if not cap.isOpened():
+            print("DirectShow failed, trying default...")
+            cap = cv2.VideoCapture(0)  # Try default
+            
+        if not cap.isOpened():
+            print("Failed to open camera")
+            return None
+            
+        # Set camera properties
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
+        # Test camera
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            print("Failed to read from camera")
+            cap.release()
+            return None
+            
+        print("Camera initialized successfully")
+        return cap
+    except Exception as e:
+        print(f"Error initializing camera: {str(e)}")
+        if 'cap' in locals() and cap is not None:
+            cap.release()
+        return None
+
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -33,105 +75,284 @@ migrate = Migrate(app, db)
 # Initialize Bootstrap
 Bootstrap(app)
 
+# Global variables for attendance tracking
+already_marked_id_student = []
+already_marked_id_admin = []
+today_attendance = []  # Store today's attendance records
+
+
+
 
 @app.route('/')
 def home():
     return render_template('home.html')
 
-# Load known student images
-known_images = []
-known_ids = []
+def load_known_faces():
+    """Load and encode faces from the images directory"""
+    print("Starting to load known faces...")
+    known_faces = []
+    known_ids = []
+    
+    if not os.path.exists(app.config['UPLOAD_FOLDER']):
+        print(f"ERROR: Upload folder {app.config['UPLOAD_FOLDER']} does not exist!")
+        return [], []
+    
+    image_files = [f for f in os.listdir(app.config['UPLOAD_FOLDER']) 
+                   if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+    
+    if not image_files:
+        print("ERROR: No image files found in upload folder!")
+        return [], []
+    
+    print(f"Found {len(image_files)} image files")
+    
+    for filename in image_files:
+        try:
+            image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            print(f"Processing {image_path}")
+            
+            # Load image
+            image = face_recognition.load_image_file(image_path)
+            if image is None:
+                print(f"Failed to load image: {image_path}")
+                continue
+                
+            # Convert to RGB
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Detect faces
+            face_locations = face_recognition.face_locations(rgb_image)
+            if not face_locations:
+                print(f"No face detected in {filename}")
+                continue
+            
+            # Get face encodings
+            face_encodings = face_recognition.face_encodings(rgb_image, face_locations)
+            if face_encodings:
+                known_faces.append(face_encodings[0])
+                student_id = os.path.splitext(filename)[0]
+                known_ids.append(student_id)
+                print(f"Successfully encoded face for student ID: {student_id}")
+            else:
+                print(f"Could not encode face in {filename}")
+            
+        except Exception as e:
+            print(f"Error processing {filename}: {str(e)}")
+            continue
+    
+    # Save encodings to file
+    if known_faces:
+        try:
+            with open("EncodeFile.p", "wb") as file:
+                pickle.dump([known_faces, known_ids], file)
+            print(f"Successfully saved {len(known_faces)} face encodings")
+        except Exception as e:
+            print(f"Error saving encodings: {str(e)}")
+    
+    print(f"Successfully loaded {len(known_faces)} face encodings")
+    return known_faces, known_ids
 
-# Path to the folder containing student images
-images_folder = app.config['UPLOAD_FOLDER']
-
-for filename in os.listdir(images_folder):
-    if filename.endswith(".jpg") or filename.endswith(".png"):
-        image_path = os.path.join(images_folder, filename)
-        image = face_recognition.load_image_file(image_path)
-        encoding = face_recognition.face_encodings(image)[0]
-        known_images.append(encoding)
-        known_ids.append(filename.split(".")[0])  # Use filename as student ID
-
-# Save the encoded data to a file
-with open("EncodeFile.p", "wb") as file:
-    pickle.dump([known_images, known_ids], file)
-
-# Load encoded face data
-with open("EncodeFile.p", "rb") as file:
-    encodedFaceKnown, studentIDs = pickle.load(file)
+# Initialize face encodings
+print("Initializing face encodings...")
+try:
+    if os.path.exists("EncodeFile.p"):
+        with open("EncodeFile.p", "rb") as file:
+            encodedFaceKnown, studentIDs = pickle.load(file)
+            print(f"Loaded {len(encodedFaceKnown)} existing face encodings")
+    else:
+        print("No existing encodings found, generating new ones...")
+        encodedFaceKnown, studentIDs = load_known_faces()
+        if not encodedFaceKnown:
+            print("WARNING: No face encodings were loaded!")
+except Exception as e:
+    print(f"Error loading face encodings: {str(e)}")
+    encodedFaceKnown, studentIDs = [], []
 
 
-# Initialize video capture with DirectShow backend
-capture = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-capture.set(cv2.CAP_PROP_FRAME_WIDTH, 160)  # Set width to 1280 pixels
-capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 120)  # Set height to 720 pixels
+
 
 
 def mark_attendance_db(student_id):
-    # Check if the student exists
-    student = Student.query.filter_by(admin_number=student_id).first()
-    if student:
+    print(f"Attempting to mark attendance for student ID: {student_id}")
+    
+    try:
+        # Check if the student exists
+        student = Student.query.filter_by(admin_number=student_id).first()
+        if not student:
+            print(f"Student with ID {student_id} not found")
+            return None, 'Student not registered. Please contact admin.'
+
+        # Check if attendance already marked for today
+        today = datetime.now().date()
+        existing_attendance = Attendance.query.filter(
+            Attendance.student_id == student.id,
+            func.date(Attendance.date) == today
+        ).first()
+
+        if existing_attendance:
+            print(f"Attendance already marked for student {student.name} today")
+            return student, "Attendance already marked for today!"
+        
         try:
             # Create a new attendance record
-            attendance = Attendance(student_id=student.id, status='Present')
+            attendance = Attendance(
+                student_id=student.id,
+                status='Present',
+                date=datetime.now()  # Explicitly set the date
+            )
             db.session.add(attendance)
             db.session.commit()
-            flash(f'Attendance marked successfully for {student.name}!', 'success')
-            return student
+            print(f"Successfully marked attendance for {student.name}")
+
+            # Add to today's attendance list
+            attendance_record = {
+                'name': student.name,
+                'department': student.department,
+                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            global today_attendance
+            today_attendance.append(attendance_record)
+            
+            # Update session with student info
+            session['current_student'] = {
+                'name': student.name,
+                'department': student.department,
+                'total_attendance': len([att for att in student.attendances if att.status == 'Present']),
+                'admin_number': student.admin_number,
+                'image_path': url_for('static', filename=student.image_path.replace('static/', '')) if student.image_path else None
+            }
+            
+            # Clear the student after a short delay
+            def clear_student():
+                time.sleep(5)  # Keep student info for 5 seconds
+                if 'current_student' in session:
+                    del session['current_student']
+            
+            # Run the clear in background
+            import threading
+            threading.Thread(target=clear_student).start()
+            
+            return student, 'Attendance marked successfully!'
+            
         except Exception as e:
+            print(f"Database error while marking attendance: {str(e)}")
             db.session.rollback()
-            flash('Error marking attendance. Please try again.', 'error')
-            return None
-    else:
-        flash('Student not registered. Please contact admin.', 'error')
-        return None
+            return None, f'Error marking attendance: {str(e)}'
+            
+    except Exception as e:
+        print(f"Unexpected error in mark_attendance_db: {str(e)}")
+        if 'db' in locals():
+            db.session.rollback()
+        return None, 'An unexpected error occurred. Please try again.'
 
 def mark_attendance():
+    global capture, encodedFaceKnown, studentIDs
+    
+    print("Starting mark_attendance function...")
+    
+    if not encodedFaceKnown or not studentIDs:
+        print("No known faces loaded. Please add student images first.")
+        return
+    
+    if capture is None or not capture.isOpened():
+        capture = initialize_camera()
+        if capture is None:
+            print("Error: Could not initialize camera")
+            return
+    
     while True:
-        success, img = capture.read()
+        try:
+            if capture is None or not capture.isOpened():
+                print("Camera disconnected, attempting to reconnect...")
+                capture = initialize_camera()
+                if capture is None:
+                    print("Failed to reconnect camera")
+                    return
+                
+            success, frame = capture.read()
+            if not success:
+                print("Failed to grab frame, retrying...")
+                time.sleep(1)
+                continue
+                
+            # Process frame
+            small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+            rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+            
+            # Find faces in frame
+            face_locations = face_recognition.face_locations(rgb_small_frame)
+            if face_locations:
+                print(f"Found {len(face_locations)} faces")
+                
+                face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
+                
+                # Process each face found
+                for face_encoding, face_location in zip(face_encodings, face_locations):
+                    # Scale back up face locations
+                    top, right, bottom, left = [coord * 4 for coord in face_location]
+                    
+                    # Draw rectangle around face (default red for unknown)
+                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
+                    
+                    if len(encodedFaceKnown) > 0:
+                        # Compare with known faces
+                        matches = face_recognition.compare_faces(encodedFaceKnown, face_encoding, tolerance=0.6)
+                        print(f"Face comparison results: {matches}")
+                        
+                        if True in matches:
+                            match_index = matches.index(True)
+                            student_id = studentIDs[match_index]
+                            print(f"Matched with student ID: {student_id}")
+                            
+                            # Create app context for database operations
+                            with app.app_context():
+                                student, message = mark_attendance_db(student_id)
+                                if student:
+                                    # Change rectangle to green for recognized face
+                                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                                    
+                                    # Display student info and attendance status
+                                    cv2.putText(frame, f"{student.name}", (left, top - 30),
+                                              cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
+                                    cv2.putText(frame, message, (left, top - 10),
+                                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                                    print(f"Attendance status: {message}")
+                                else:
+                                    # Display error message
+                                    cv2.putText(frame, message, (left, top - 10),
+                                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                                    print(f"Error marking attendance: {message}")
+                        else:
+                            print("No match found - Unknown face")
+                            cv2.putText(frame, "Unknown", (left, top - 30),
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
+                            cv2.putText(frame, "Please register", (left, top - 10),
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            
+            # Convert frame to jpg for streaming
+            ret, buffer = cv2.imencode('.jpg', frame)
+            if not ret:
+                print("Failed to encode frame")
+                continue
+                
+            frame = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                   
+        except Exception as e:
+            print(f"Error in frame processing: {str(e)}")
+            if capture is not None:
+                capture.release()
+            capture = None
+            time.sleep(1)
+            continue
 
-        if not success:
-            print("Failed to grab frame from webcam")
-            break
 
-        # Resize and convert the image to RGB
-        imgSmall = cv2.resize(img, (0, 0), None, 0.25, 0.25)
-        imgSmall = cv2.cvtColor(imgSmall, cv2.COLOR_BGR2RGB)
 
-        # Detect faces in the current frame
-        faceCurrentFrame = face_recognition.face_locations(imgSmall)
-        encodeCurrentFrame = face_recognition.face_encodings(imgSmall, faceCurrentFrame)
 
-        if faceCurrentFrame:
-            for encodeFace, faceLocation in zip(encodeCurrentFrame, faceCurrentFrame):
-                # Compare the detected face with known faces
-                matches = face_recognition.compare_faces(encodedFaceKnown, encodeFace)
-                faceDistance = face_recognition.face_distance(encodedFaceKnown, encodeFace)
-                matchIndex = np.argmin(faceDistance)
 
-                if matches[matchIndex]:
-                    # If a match is found, mark attendance
-                    id = studentIDs[matchIndex]
-                    print(f"Attendance marked for Student ID: {id}")
 
-                    # Mark attendance using SQLAlchemy
-                    mark_attendance_db(id)
 
-                    # Draw a rectangle around the detected face
-                    y1, x2, y2, x1 = faceLocation
-                    y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(img, f"ID: {id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-
-        # Encode the frame as JPEG
-        ret, buffer = cv2.imencode(".jpg", img)
-        if not ret:
-            print("Failed to encode frame")
-            break
-
-        frame = buffer.tobytes()
-        yield (b"--frame\r\n" b"Content-Type: image/jpeg \r\n\r\n" + frame + b"\r\n")
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -205,7 +426,7 @@ def student_dashboard(admin_number):
 def admin_dashboard():
     if 'admin_id' not in session:
         flash('Please log in to access the admin dashboard', 'error')
-        return redirect(url_for('login'))  # Changed from admin_login to login
+        return redirect(url_for('login')) 
 
     form = StudentForm()
     if form.validate_on_submit():
@@ -279,6 +500,19 @@ def add_student():
                 file.save(file_path)
                 image_path = f"images/students/{filename}"
 
+                # Verify the uploaded image has a detectable face
+                try:
+                    image = face_recognition.load_image_file(file_path)
+                    face_locations = face_recognition.face_locations(image)
+                    if not face_locations:
+                        os.remove(file_path)  # Remove the invalid image
+                        flash('No face detected in the uploaded image. Please try again.', 'error')
+                        return redirect(url_for('add_student'))
+                except Exception as e:
+                    os.remove(file_path)
+                    flash('Error processing the image. Please try a different image.', 'error')
+                    return redirect(url_for('add_student'))
+
             # Create student without total_attendance
             student = Student(
                 admin_number=form.admin_number.data,
@@ -291,7 +525,6 @@ def add_student():
                 notice=form.notice.data,
                 image_path=image_path
             )
-
             
             student.set_password(form.password.data)
             db.session.add(student)
@@ -305,13 +538,19 @@ def add_student():
             db.session.add(attendance)
             db.session.commit()
 
+            # Refresh face encodings after adding new student
+            known_images, known_ids = load_face_encodings()
+            global encodedFaceKnown, studentIDs
+            encodedFaceKnown = known_images
+            studentIDs = known_ids
+
             flash('Student added successfully!', 'success')
             return redirect(url_for('admin_dashboard'))
 
         except Exception as e:
             db.session.rollback()
             flash(f'Error adding student: {str(e)}', 'error')
-            print(f"Error: {str(e)}")  # For debugging
+            print(f"Error: {str(e)}")
             return redirect(url_for('add_student'))
 
     return render_template('add_student.html', form=form)
@@ -331,97 +570,157 @@ def create_default_admin():
     else:
         print("Default admin already exists.")
 
-# Edit Student Route
 @app.route('/admin/edit/<int:student_id>', methods=['GET', 'POST'])
 def edit_student(student_id):
+    if 'admin_id' not in session:
+        flash('Please log in to edit student records', 'error')
+        return redirect(url_for('login'))
+
     student = Student.query.get_or_404(student_id)
     form = StudentForm(obj=student)
 
     if form.validate_on_submit():
-        # Handle file upload
-        file = form.image_path.data
-        if file:
-            filename = secure_filename(file.filename)
-            file_path = os.path.join('static/images/students/', filename)  # Save to upload folder
-            file.save(file_path)
-            student.image_path = f"images/students/{filename}"  # Update the relative path
+        try:
+            # Handle file upload
+            file = form.image_path.data
+            if file and file.filename:
+                # Delete old image if it exists
+                if student.image_path:
+                    old_image_path = os.path.join('static', student.image_path)
+                    if os.path.exists(old_image_path):
+                        os.remove(old_image_path)
+                
+                # Save new image
+                filename = secure_filename(f"{form.admin_number.data}{os.path.splitext(file.filename)[1]}")
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                student.image_path = f"images/students/{filename}"
 
+            # Update other fields
+            student.admin_number = form.admin_number.data
+            student.name = form.name.data
+            student.dob = form.dob.data
+            student.department = form.department.data
+            student.year = form.year.data
+            student.email = form.email.data
+            student.address = form.address.data
+            student.notice = form.notice.data
 
-        # Update other fields
-        form.populate_obj(student)
-        if form.password.data:
-            student.set_password(form.password.data)  # Update password if provided
-        db.session.commit()
-        flash('Student updated successfully!', 'success')
-        return redirect(url_for('admin_dashboard'))
+            if form.password.data:
+                student.set_password(form.password.data)
+
+            db.session.commit()
+
+            # Reload face encodings after updating student image
+            if file and file.filename:
+                global encodedFaceKnown, studentIDs
+                known_images, known_ids = load_face_encodings()
+                encodedFaceKnown = known_images
+                studentIDs = known_ids
+
+            flash('Student updated successfully!', 'success')
+            return redirect(url_for('admin_dashboard'))
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error updating student: {str(e)}', 'error')
+            print(f"Error updating student: {str(e)}")
+            return redirect(url_for('edit_student', student_id=student_id))
 
     return render_template('edit_student.html', form=form, student=student)
 
-# Delete Student Route
 @app.route('/admin/delete/<int:student_id>', methods=['POST'])
 def delete_student(student_id):
     if 'admin_id' not in session:
         flash('Please log in to delete student records', 'error')
-        return redirect(url_for('admin_login'))
+        return redirect(url_for('login'))
 
-    # Fetch the student
-    student = Student.query.get_or_404(student_id)
+    try:
+        # Fetch the student
+        student = Student.query.get_or_404(student_id)
 
-    # Delete all attendance records for the student
-    Attendance.query.filter_by(student_id=student.id).delete()
+        # Delete student's image file if it exists
+        if student.image_path:
+            image_file_path = os.path.join('static', student.image_path)
+            if os.path.exists(image_file_path):
+                os.remove(image_file_path)
 
-    # Delete the student
-    db.session.delete(student)
-    db.session.commit()
+        # Delete all attendance records for the student
+        Attendance.query.filter_by(student_id=student.id).delete()
 
-    flash('Student and related attendance records deleted successfully!', 'success')
+        # Delete the student from database
+        db.session.delete(student)
+        db.session.commit()
+
+        # Reload face encodings after deleting student
+        global encodedFaceKnown, studentIDs
+        known_images, known_ids = load_face_encodings()
+        encodedFaceKnown = known_images
+        studentIDs = known_ids
+
+        flash('Student and related records deleted successfully!', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error deleting student: {str(e)}', 'error')
+        print(f"Error deleting student: {str(e)}")
+    
     return redirect(url_for('admin_dashboard'))
 
-@app.route('/search_student/<string:admin_number>')
-def search_student(admin_number):
-    student = Student.query.filter_by(admin_number=admin_number).first()
-    if student:
-        total_attendance = len([att for att in student.attendances if att.status == 'Present'])
-        return jsonify({
-            'success': True,
-            'student': {
-                'admin_number': student.admin_number,
-                'name': student.name,
-                'department': student.department,
-                'total_attendance': total_attendance,
-                'image_path': url_for('static', filename=student.image_path.replace('static/', '')) if student.image_path else None
-            }
-        })
-    return jsonify({'success': False})
 
-@app.route('/start_attendance')
+@app.route('/start_attendance', methods=['GET', 'POST'])
 def start_attendance():
+    global capture
+    if request.method == 'POST':
+        if capture is None:
+            capture = cv2.VideoCapture(0)
+            if not capture.isOpened():
+                flash('Failed to initialize camera', 'error')
+                return redirect(url_for('home'))
+            # Set camera properties
+            capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        return redirect(url_for('attendance_view'))
     return render_template('start_attendance.html')
+
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(mark_attendance(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    """Route for the video feed"""
+    return Response(mark_attendance(),
+                   mimetype='multipart/x-mixed-replace; boundary=frame')
 
 from io import StringIO
 from datetime import datetime
 
-@app.route('/mark_attendance_manual', methods=['POST'])
-def mark_attendance_manual():
-    data = request.get_json()
-    student_id = data.get('student_id')
+
+@app.route('/student_updates')
+def student_updates():
+    def generate():
+        while True:
+            # Check if we have a student in the current frame
+            if 'current_student' in session:
+                student = session['current_student']
+                data = {
+                    'success': True,
+                    'student': student
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+            time.sleep(0.5)  # Check every 500ms
     
-    student = Student.query.filter_by(admin_number=student_id).first()
-    if student:
-        attendance = Attendance(student_id=student.id, status='Present')
-        db.session.add(attendance)
-        db.session.commit()
-        
-        total_attendance = len([att for att in student.attendances if att.status == 'Present'])
+    return Response(stream_with_context(generate()),
+                   mimetype='text/event-stream')
+
+@app.route('/get_current_student')
+def get_current_student():
+    if 'current_student' in session:
         return jsonify({
             'success': True,
-            'total_attendance': total_attendance
+            'student': session['current_student']
         })
-    return jsonify({'success': False})
+    return jsonify({
+        'success': False,
+        'student': None
+    })
 
 @app.route('/download_attendance')
 def download_attendance():
@@ -457,6 +756,100 @@ def download_attendance():
             'Content-type': 'text/csv'
         }
     )
+
+@app.teardown_appcontext
+def cleanup(exception=None):
+    """Cleanup resources on application shutdown"""
+    global capture
+    if capture is not None:
+        capture.release()
+        capture = None
+
+@app.route('/today_attendance')
+def today_attendance():
+    """Route to display today's attendance records"""
+    # Get today's date
+    today = datetime.now().date()
+    
+    # Query database for today's attendance records
+    attendance_records = db.session.query(
+        Attendance, Student
+    ).join(Student).filter(
+        func.date(Attendance.date) == today
+    ).all()
+    
+    # Format the records
+    attendance_list = [{
+        'student_name': student.name,
+        'department': student.department,
+        'timestamp': attendance.date.strftime('%Y-%m-%d %H:%M:%S')
+    } for attendance, student in attendance_records]
+    
+    return render_template('today_attendance.html', attendance_records=attendance_list)
+
+
+
+@app.route('/download_today_attendance')
+def download_today_attendance():
+    """Route to download today's attendance as CSV"""
+    # Create a string buffer to write the CSV data
+    si = StringIO()
+    cw = csv.writer(si)
+    cw.writerow(['Student Name', 'Department', 'Time', 'Status'])
+    
+    # Get today's date
+    today = datetime.now().date()
+    
+    # Query database for today's attendance records
+    attendance_records = db.session.query(
+        Attendance, Student
+    ).join(Student).filter(
+        func.date(Attendance.date) == today
+    ).all()
+    
+    # Write records to CSV
+    for attendance, student in attendance_records:
+        cw.writerow([
+            student.name,
+            student.department,
+            attendance.date.strftime('%Y-%m-%d %H:%M:%S'),
+            'Present'
+        ])
+    
+    output = si.getvalue()
+    si.close()
+    
+    filename = f"attendance_{datetime.now().strftime('%Y%m%d')}.csv"
+    
+    return Response(
+        output,
+        mimetype='text/csv',
+        headers={
+            'Content-Disposition': f'attachment; filename={filename}',
+            'Content-type': 'text/csv'
+        }
+    )
+
+
+@app.route('/clear_attendance', methods=['POST'])
+def clear_attendance():
+    """Route to clear today's attendance records"""
+    try:
+        global today_attendance
+        today = date.today()
+        
+        # Clear both database records and in-memory list
+        Attendance.query.filter(
+            func.date(Attendance.date) == today
+        ).delete(synchronize_session=False)
+        db.session.commit()
+        
+        today_attendance = []
+        
+        return jsonify({'success': True, 'message': 'Attendance cleared successfully'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)})
 
 if __name__ == '__main__':
     with app.app_context():

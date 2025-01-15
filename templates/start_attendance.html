@@ -1,143 +1,66 @@
 {% extends "base.html" %}
-
 {% block title %}Start Attendance{% endblock %}
 
 {% block content %}
-<div class="d-flex min-vh-90">
-    <!-- Left side - Camera Feed -->
-    <div class="flex-grow-1 bg-light d-flex align-items-center justify-content-center mb-4">
-        <img src="{{ url_for('video_feed') }}" alt="Camera Feed" class="camera-feed">
-    </div>
-
-    <!-- Right side - Student Info and Controls -->
-    <div class="attendance-sidebar">
-        <!-- Search and Manual Attendance -->
-        <div class="p-3 border-bottom">
-            <div class="d-flex gap-2">
-                <div class="input-group">
-                    <input type="text" id="studentSearch" class="form-control" placeholder="Enter admin number...">
-                    <button class="btn btn-primary" onclick="searchStudent()">
-                        <i class="fas fa-search"></i>
-                    </button>
-                </div>
-                <button class="btn btn-success" onclick="markAttendanceManually()" id="markAttendanceBtn" disabled>
-                    <i class="fas fa-check"></i>
-                </button>
+<div class="container">
+    <div class="row">
+        <div class="col-md-8">
+            <h2>Face Recognition Attendance</h2>
+            <p>Look into the frame to mark your attendance</p>
+            <div class="video-container">
+                <img src="{{ url_for('video_feed') }}" width="100%" height="auto">
             </div>
         </div>
-
-        <!-- Student Info Card -->
-        <div class="p-3">
-            <div id="messageArea"></div>
-            <div class="card shadow-sm" id="studentCard" style="display: none;">
-                <div class="card-body text-center">
-                    <img src="" class="rounded-circle mb-3" style="width: 120px; height: 120px; object-fit: cover;" id="studentImage">
-                    <h5 class="card-title mb-1" id="studentName"></h5>
-                    <p class="text-muted small mb-3" id="studentDepartment"></p>
-                    <div class="d-flex justify-content-center gap-3">
-                        <div class="text-center">
-                            <h6 class="mb-1">Total Attendance</h6>
-                            <span class="badge bg-primary" id="totalAttendance">0</span>
-                        </div>
+        <div class="col-md-4">
+            <div class="card mt-4" id="studentCard">
+                <div class="card-header bg-success text-white">
+                    <h4 class="mb-0">Last Marked Attendance</h4>
+                </div>
+                <div class="card-body">
+                    <div id="attendanceMessage" class="alert alert-info">
+                        Waiting for face detection...
+                    </div>
+                    <div class="student-info" style="display: none;">
+                        <h5 class="card-title" id="studentName"></h5>
+                        <p class="card-text" id="studentDepartment"></p>
+                        <p class="card-text">
+                            <strong>Total Attendance:</strong> 
+                            <span id="totalAttendance"></span>
+                        </p>
+                        <a href="{{ url_for('today_attendance') }}" class="btn btn-primary btn-block mt-3">
+                            View Today's Attendance
+                        </a>
                     </div>
                 </div>
             </div>
+            <!-- Separate button for quick access -->
+            <a href="{{ url_for('today_attendance') }}" class="btn btn-info btn-block mt-3">
+                <i class="fas fa-calendar-day"></i> Today's Attendance Report
+            </a>
         </div>
     </div>
 </div>
 
 <style>
-.attendance-sidebar {
-    width: 400px;
-    background: #fff;
-    border-left: 1px solid #dee2e6;
-    overflow-y: auto;
+.video-container {
+    margin-top: 20px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    overflow: hidden;
 }
 
-.camera-feed {
-    max-width: 100%;
-    height: auto;
-    margin-bottom: 2rem;
+.card {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
 }
 
-@media (max-width: 768px) {
-    .d-flex.min-vh-100 {
-        flex-direction: column;
-    }
-    
-    .attendance-sidebar {
-        width: 100%;
-        border-left: none;
-        border-top: 1px solid #dee2e6;
-    }
+.btn-block {
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.btn i {
+    margin-right: 5px;
 }
 </style>
 
-<script>
-let currentStudentId = null;
-
-async function searchStudent() {
-    const adminNumber = document.getElementById('studentSearch').value;
-    if (!adminNumber) return;
-
-    try {
-        const response = await fetch(`/search_student/${adminNumber}`);
-        const data = await response.json();
-        
-        if (data.success) {
-            document.getElementById('studentCard').style.display = 'block';
-            document.getElementById('studentName').textContent = data.student.name;
-            document.getElementById('studentDepartment').textContent = data.student.department;
-            document.getElementById('totalAttendance').textContent = data.student.total_attendance;
-            document.getElementById('studentImage').src = data.student.image_path || '/static/images/default-profile.jpg';
-            document.getElementById('markAttendanceBtn').disabled = false;
-            currentStudentId = data.student.admin_number;
-            showMessage('Student found!', 'success');
-        } else {
-            document.getElementById('studentCard').style.display = 'none';
-            document.getElementById('markAttendanceBtn').disabled = true;
-            currentStudentId = null;
-            showMessage('Student not found', 'danger');
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        showMessage('Error searching for student', 'danger');
-    }
-}
-
-async function markAttendanceManually() {
-    if (!currentStudentId) return;
-    
-    try {
-        const response = await fetch('/mark_attendance_manual', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ student_id: currentStudentId })
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            document.getElementById('totalAttendance').textContent = data.total_attendance;
-            showMessage('Attendance marked successfully!', 'success');
-        } else {
-            showMessage('Failed to mark attendance', 'danger');
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        showMessage('Error marking attendance', 'danger');
-    }
-}
-
-function showMessage(message, type) {
-    const messageArea = document.getElementById('messageArea');
-    messageArea.innerHTML = `
-        <div class="alert alert-${type} alert-dismissible fade show">
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    `;
-}
-</script>
 {% endblock %}
